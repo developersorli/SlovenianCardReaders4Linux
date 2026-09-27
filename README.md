@@ -1,106 +1,217 @@
 # SlovenianCardReaders4Linux
 
-A pair of shell scripts that prepare an Ubuntu/Debian system to use the **Slovenian electronic identity (eID)** smart card with a USB card reader in **Firefox**. The same setup works with other PKCS#15 cards, such as the Spanish DNIe.
+Angleška različica: [README.md](README.md)
 
-## What is this?
+Dve shell skripti, ki pripravita Ubuntu/Debian sistem za uporabo **slovenskega osebnega izkaznika s čipom** (elektronska identiteta, eID) z USB bralnikom kartic v brskalniku **Firefox**. Enaka nastavitev deluje tudi z drugimi PKCS#15 karticami, npr. španskim DNIe.
 
-Using a smart card on Linux involves several moving parts:
+## Kaj je to?
 
-- **pcscd** — the PC/SC daemon that talks to your USB card reader (via `libccid`)
-- **OpenSC** — PKCS#11 middleware that exposes the certificates and PINs stored on the card to applications
-- **Firefox (snap)** — a confined application that can only reach pcscd through an explicit snap interface connection
+Uporaba pametne kartice na Linuxu zahteva več sestavnih delov:
 
-This project automates all of it:
+- **pcscd** — PC/SC demon, ki komunicira z USB bralnikom kartic (prek `libccid`)
+- **OpenSC** — PKCS#11 vmesnik, ki aplikacijam izpostavi certifikate in PIN kode s kartice
+- **Firefox (snap)** — aplikacija v snap omejitvi, ki do pcscd dostopa le prek eksplicitne snap povezave
 
-| Script | Purpose |
+Projekt to samodejno uredi:
+
+| Skripta | Namen |
 |---|---|
-| `install-firefox-eid.sh` | One-time system setup (packages, user groups, Snap Firefox, OpenSC configuration) |
-| `start-firefox-pcscd.sh` | Runs a managed eID session: starts pcscd → launches Firefox → stops pcscd when you close it |
+| `install-firefox-eid.sh` | Enkratna nastavitev sistema (paketi, uporabniške skupine, Snap Firefox, OpenSC konfiguracija) |
+| `start-firefox-pcscd.sh` | Upravlja eID sejo: zagon pcscd → zagon Firefoxa → ugasnitev pcscd ob zaprtju |
 
-### Why manage pcscd manually?
+### Zakaj ročno upravljanje pcscd?
 
-If `pcscd` is enabled to start at boot and an eID card is inserted, the OS login manager can use the **card** for authentication instead of your password. To avoid that, this project keeps `pcscd` off by default and only starts it around a Firefox session — so the card is "live" only while you actually need it.
+Če je `pcscd` omogočen za samodejni zagon in je ob zagonu sistema vstavljena eID kartica, se prijava v sistem lahko opravi s **kartico** namesto gesla. Zato skripte `pcscd` zaganjajo in ugašajo samo okoli Firefox seje — kartica je "aktivna" le, medtem ko jo res potrebuješ.
 
-### What gets configured?
+### Kaj se nastavi?
 
-- Your user is added to the `plugdev` group (USB device access)
-- Required packages are installed: `pcscd`, `libccid`, `libpcsclite1`, `pcsc-tools`, `opensc`, `snapd`
-- Snap Firefox is installed and connected to pcscd (`sudo snap connect firefox:pcscd`)
-- A Firefox profile is prepared for smart cards (personal certificate auto-selection, no initial security dialogs)
-- OpenSC is configured so that only the **high-security** eID application (QES — "Podpis in prijava") is offered; the low-security pinless one ("Prijava brez PIN-a", AID `E828BD080F014E585031`) is disabled. The original `/etc/opensc/opensc.conf` is backed up before modification.
+- Uporabnik se doda v skupino `plugdev` (dostop do USB naprav)
+- Namestijo se potrebni paketi: `pcscd`, `libccid`, `libpcsclite1`, `pcsc-tools`, `opensc`, `snapd`
+- Namesti se Snap Firefox in poveže s pcscd (`sudo snap connect firefox:pcscd`)
+- Pripravi se Firefox profil za pametne kartice (OpenSC PKCS#11 modul, dodan v bazo modulov profila `pkcs11.txt`; po želji omogočeni enterprise roots — zaupanje sistemskim korenskim potrdilom)
+- OpenSC se konfigurira tako, da je na voljo samo **visoko-varnostna** eID aplikacija (QES — "Podpis in prijava"); nizko-varnostna ("Prijava brez PIN-a", AID `E828BD080F014E585031`) se onemogoči. Pred spremembo se originalna datoteka `/etc/opensc/opensc.conf` shrani kot backup.
 
-## Requirements
+## Zahteve
 
-- Ubuntu or Debian (systemd + apt)
-- Snap support (`snapd`)
-- A CCID-compatible USB smart card reader (e.g., GEMPC 420, OmniKey CardMan 3121)
-- A Slovenian eID card (or another PKCS#15 card such as DNIe)
+- Ubuntu ali Debian (systemd + apt)
+- Podpora za Snap (`snapd`)
+- CCID-kompatibilen USB bralnik pametnih kartic (npr. GEMPC 420, OmniKey CardMan 3121)
+- Slovenski osebni izkaznik s čipom (eID) ali druga PKCS#15 kartica (npr. DNIe)
 
-## Usage
+## Navodila za uporabo
 
-### 1. One-time installation
+### 1. Enkratna namestitev
 
 ```bash
 ./install-firefox-eid.sh
 ```
 
-The script will:
+Skripta bo:
 
-1. Add you to the `plugdev` group — **log out and back in** afterwards for it to take effect (or run `newgrp plugdev`)
-2. Install any missing packages
-3. Ask whether to keep or disable auto-start of `pcscd`:
-   - answer **n** → pcscd is disabled/stopped and fully managed by `start-firefox-pcscd.sh` (recommended)
-   - press **Enter / y** → pcscd keeps its current auto-start behaviour
-4. Install Snap Firefox and connect it to pcscd
-5. Prepare the Firefox profile for smart cards
-6. Configure OpenSC (a timestamped backup of `opensc.conf` is kept)
+1. Dodala uporabnika v skupino `plugdev` — nato se **odjavi in ponovno prijavi**, da se pravice uveljavijo (ali izvedi `newgrp plugdev`)
+2. Namestila manjkajoče pakete
+3. Vprašala, naj avtomatski zagon `pcscd` ostane omogočen ali ga onemogoči:
+   - odgovor **n** → pcscd se onemogoči in ustavi; v celoti ga upravlja `start-firefox-pcscd.sh` (priporočeno)
+   - **Enter / y** → avtomatski zagon ostane, kot je trenutno nastavljen
+4. Namestila Snap Firefox in ga povezala s pcscd
+5. Pripravila Firefox profil za pametne kartice
+6. Konfigurirala OpenSC (ohranjen je backup `opensc.conf` s časovnim žigom)
 
-### 2. Running an eID session
+### 2. Zagon eID seje
 
 ```bash
 ./start-firefox-pcscd.sh [URL]
 ```
 
-The script will:
+Skripta bo:
 
-1. Verify prerequisites (`plugdev` membership, Snap Firefox, pcscd snap connection, required packages)
-2. Start `pcscd.service` + `pcscd.socket` and wait until active (max 10 s)
-3. Check that a reader (and card) is present via `pcsc_scan` — you can continue without one if you want
-4. Launch Firefox (optionally with the URL you passed). If Firefox is already running, it opens a new tab and waits for **all** Firefox windows to be closed
-5. After Firefox closes: wait briefly for card operations to finish, stop `pcscd` (escalating to kill if needed) and clean up its communication socket
+1. Preverila predpogoje (članstvo v skupini `plugdev`, Snap Firefox, snap povezavo s pcscd, potrebne pakete)
+2. Zagnala `pcscd.service` + `pcscd.socket` in počakala na aktivno stanje (največ 10 s)
+3. Preverila prisotnost bralnika in kartice prek `pcsc_scan` — po želji lahko nadaljuješ tudi brez njiju
+4. Zagnala Firefox (po želji z podano URL). Če Firefox že teče, odpre nov zavihek in počaka, da zapreš **vsa** okna Firefoxa
+5. Po zaprtju Firefoxa: počaka kratek čas za dokončanje operacij s kartico, ustavi `pcscd` (po potrebi s kill) in počisti komunikacijski socket
 
-### 3. Verifying the setup
+### 3. Hiter zagon z dvoklikom (Startup Service Card Reader)
+
+Če želiš samo **zagnati** `pcscd`, brez celotne Firefox seje, uporabi zaganjalnik:
+
+1. Dvokliki na `StartupServiceCardReader.desktop` v tej mapi.
+   - Pri prvem zagonu (GNOME/Ubuntu): desni klik na datoteko → **Allow Launching** (Dovoli zagon) — dokler tega ne storiš, je označen kot "Untrusted launcher".
+2. Odpre se terminalsko okno in zažene `startup-service-card-reader.sh`. Prikaže se **GUI okno za vnos gesla** (polkit) — vnesi geslo svojega računa, da dovoliš zagon servisa.
+3. Skripta zagnane `pcscd.service` + `pcscd.socket`, izpiše rezultat in čaka na **Enter** za zaprtje. Če polkit agent ni na voljo, se uporabi navadno `sudo` vprašanje v terminalu.
+
+Nasvet: desni klik → *Add to Desktop* (Dodaj na namizje) ali *Add to Favorites*, da bo vedno na dosegu roke. Za ugasnitev pcscd nato izvedi: `sudo systemctl stop pcscd.service pcscd.socket`.
+
+### 4. Preverjanje nastavitve
 
 ```bash
-pkcs11-tool -L        # should list only the high-security eID slots
-pcsc_scan             # shows reader/card status
+pkcs11-tool -L        # naj izpiše samo visoko-varnostne eID sloti
+pcsc_scan             # pokaže stanje bralnika/kartice
 ```
 
-In Firefox: *Settings → Privacy & Security → Security Devices* — the OpenSC module and your card's certificates should be listed.
+V Firefoxu: *Nastavitve → Zasebnost in varnost → Varnostne naprave* — naveden naj bo OpenSC modul in certifikati s tvoje kartice.
 
-## Troubleshooting / manual steps
+## Odpravljanje težav / ročni koraki
 
-- **Reader not detected** — check `lsusb`, try another USB port/cable; run `pcsc_scan` while pcscd is running
-- **OpenSC module missing in Firefox** — load it manually: *Settings → Privacy & Security → Security Devices → Load* and enter the module file name (e.g. `opensc-pkcs11.so`)
-- **Reconnect the snap interface**: `sudo snap connect firefox:pcscd`
-- **Manual pcscd control**:
+- **Bralnik ni zaznan** — preveri `lsusb`, poskusi drug USB priključek ali kabel; `pcsc_scan` zaženi, ko pcscd teče
+- **OpenSC modul manjka v Firefoxu** — skripta `install-firefox-eid.sh` ga doda samodejno (v datoteko `pkcs11.txt` profila). Če ga vseeno ni, ga naloži ročno: *Nastavitve → Zasebnost in varnost → Varnostne naprave → Naloži* in vpiši `opensc-pkcs11.so`, nato Firefox ponovno zagnaj
+- **Ponovna povezava snap vmesnika**: `sudo snap connect firefox:pcscd`
+- **Ročno upravljanje pcscd**:
 
   ```bash
-  sudo systemctl start pcscd.service pcscd.socket   # before using the card
-  sudo systemctl stop pcscd.service pcscd.socket    # after
+  sudo systemctl start pcscd.service pcscd.socket   # pred uporabo kartice
+  sudo systemctl stop pcscd.service pcscd.socket    # po uporabi
   ```
 
-- **Inspect OpenSC configuration**: `/etc/opensc/opensc.conf` (backups are kept as `opensc.conf.bak.<timestamp>`)
+- **Pregled OpenSC konfiguracije**: `/etc/opensc/opensc.conf` (backupi se hranijo kot `opensc.conf.bak.<časovni žig>`)
 
-For full manual setup instructions, see the *Ročno nastavljanje* section of [README_sl.md](README_sl.md).
+## Ročno nastavljanje
 
-## Files
+> **Opomba:** Večino nastavitev avtomatizira skripta `install-firefox-eid.sh`. Spodnja navodila so za referenco in ročne posege.
 
-| File | Description |
+### 1. OpenSC konfiguracija (onemogoči nizko-varnostni certifikat)
+
+Skripta to naredi samodejno. Za ročno urejanje:
+
+```bash
+sudo nano /etc/opensc/opensc.conf
+```
+
+in vneseš:
+
+```
+app default {
+    framework pkcs15 {
+        # Slovenski eID - nizka varnost (brez PIN-a, "Prijava brez PIN-a")
+        application E828BD080F014E585031 {
+            model = "ChipDocLite";
+            disable = true;
+            user_pin = "Norm PIN";
+        }
+
+        # Slovenski eID - visoka varnost (QES, "Podpis in prijava")
+        application E828BD080F014E585030 {
+            model = "ChipDocLite";
+            user_pin = "Norm PIN";
+            sign_pin = "Sig PIN";
+        }
+    }
+}
+```
+
+To lahko tudi skrajšaš — gre samo za to, da onemogočiš aplikacijo `*31` (nizka varnost).
+
+### 2. Preverjanje slotov kartice
+
+```bash
+pkcs11-tool -L
+```
+
+sedaj izpiše samo ta dva slot-a z večjo varnostjo.
+
+### 3. Dodajanje PKCS#11 modula v Firefox
+
+Firefox (NSS) PKCS#11 module dejansko naloži iz **baze modulov** profila — datoteke
+`pkcs11.txt` v imeniku profila. Skripta `install-firefox-eid.sh` to naredi samodejno:
+v `pkcs11.txt` **vseh** profilov doda vnos `library=opensc-pkcs11.so` (idempotentno —
+če vnos že obstaja, ga ne doda dvakrat). Ker je modul znotraj snap Firefoxa, se uporabi
+**golo ime** knjižnice (brez absolutne poti) — snap ga sam najde. To je isti mehanizem,
+kot ga shrani dialog *Naloži*.
+
+Če avtomatika ne deluje, modul naloži ročno:
+- **Prek dialoga**: *Nastavitve → Zasebnost in varnost → Varnostne naprave → Naloži* in
+  vpiši ime datoteke (brez poti) `opensc-pkcs11.so`, nato Firefox ponovno zagnaj.
+- **Prek datoteke** `pkcs11.txt` profila (pot:
+  `~/snap/firefox/common/.mozilla/firefox/<profil>/pkcs11.txt`) — dodaj:
+
+  ```
+  library=opensc-pkcs11.so
+  name=OpenSC Smartcard Framework
+  ```
+
+  (modul se naloži ob naslednjem zagonu Firefoxa).
+
+### 4. Snap Firefox — povezava s pcscd
+
+Skripti to naredita samodejno. Za ročno:
+
+```bash
+sudo snap connect firefox:pcscd
+```
+
+### 5. Zagon Firefoxa za eID
+
+Uporabi skripto, ki upravlja življenjski cikel pcscd:
+
+```bash
+./start-firefox-pcscd.sh
+```
+
+ali ročno:
+
+```bash
+sudo systemctl start pcscd.service pcscd.socket
+snap run firefox
+# ... po uporabi:
+sudo systemctl stop pcscd.service pcscd.socket
+```
+
+> ⚠️ **POZOR:** Če je `pcscd` omogočen za avtomatski zagon in je kartica vstavljena ob bootu, jo OS lahko zahteva za prijavo namesto gesla! Priporočljivo je, da `pcscd` ostane onemogočen (disabled) in ga upravlja skripta `start-firefox-pcscd.sh`.
+
+## Vir postopka
+
+Postopek temelji na navodilih s foruma (avtor: SloTech), ki opisujejo, kako omogočiti uporabo slovenskih osebnih izkaznikov s čipom na Debian/Ubuntu sistemih. Ta projekt ta navodila samodejno pretvori v skripti.
+
+## Datoteke
+
+| Datoteka | Opis |
 |---|---|
-| `install-firefox-eid.sh` | One-time setup script (requires sudo) |
-| `start-firefox-pcscd.sh` | Managed eID session runner (requires sudo) |
+| `install-firefox-eid.sh` | Enkratna namestitvena skripta (zahteva sudo) |
+| `start-firefox-pcscd.sh` | Skripta za upravljanje eID seje (zahteva sudo) |
+| `StartupServiceCardReader.desktop` | Zaganjalnik za dvoklik — zagon pcscd (Ubuntu/Debian) |
+| `startup-service-card-reader.sh` | Zažene `pcscd.service` + `pcscd.socket` z GUI (polkit) ali sudo avtentikacijo; uporablja ga zaganjalnik |
+| `startup-service-card-reader-icon.png` | Ikona, ki jo uporablja zaganjalnik |
 
-## License
+## Licenca
 
 [MIT](LICENSE)

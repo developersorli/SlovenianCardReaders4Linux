@@ -139,6 +139,63 @@ fi
 # ==========================================
 SNAP_FIREFOX_DIR="$HOME/snap/firefox/common/.mozilla/firefox"
 
+# --- Pomožna: idempotentno doda OpenSC modul v pkcs11.txt (NSS bazo modulov) ---
+# pkcs11.txt je datoteka, ki jo NSS (Firefox) ob zagonu prebere in iz nje
+# dejansko naloži PKCS#11 module. To je AVTORITATIVNI mehanizem nalaganja —
+# enako, kot ga shrani dialog »Naloži« v Varnostnih napravah. Ker je modul
+# znotraj snap Firefoxa, uporabimo GOTO IME knjižnice (brez absolutne poti).
+add_opensc_module_to_profile() {
+    local prof_dir="$1"
+    [[ -d "$prof_dir" ]] || return 0
+    local pkcs11_file="$prof_dir/pkcs11.txt"
+
+    # Datoteke še ni (profil še ni bil zagnan) -> ustvari jo prazno.
+    [[ -f "$pkcs11_file" ]] || : > "$pkcs11_file"
+
+    # Idempotencija: če je modul že v bazi, ne dodaj dvakrat.
+    if grep -q '^[[:space:]]*library=opensc-pkcs11\.so' "$pkcs11_file" 2>/dev/null; then
+        log_info "  • OpenSC je že v bazi modulov: $pkcs11_file"
+        return 0
+    fi
+
+    # Prazna vrstica loči od prejšnjih vnosov (samo, če datoteka ni prazna).
+    [[ -s "$pkcs11_file" ]] && echo "" >> "$pkcs11_file"
+    {
+        echo "library=opensc-pkcs11.so"
+        echo "name=OpenSC Smartcard Framework"
+    } >> "$pkcs11_file"
+    log_info "  ✅ OpenSC dodan v bazo modulov: $pkcs11_file"
+}
+
+# --- Pomožna: idempotentno omogoči enterprise roots v user.js profila ---
+# Piše le, če nastavitev še ni prisotna; obstoječo vsebino user.js ohrani.
+set_enterprise_roots() {
+    local prof_dir="$1"
+    [[ -d "$prof_dir" ]] || return 0
+    local user_js="$prof_dir/user.js"
+    if grep -qF 'security.enterprise_roots.enabled' "$user_js" 2>/dev/null; then
+        return 0
+    fi
+    {
+        [[ -f "$user_js" && -s "$user_js" ]] && echo ""
+        echo "// Omogoči zaupanje korenskim/posredniškim potrdilom iz sistema (enterprise roots)"
+        echo 'user_pref("security.enterprise_roots.enabled", true);'
+    } >> "$user_js"
+    log_info "  ✅ enterprise roots omogočeni: $user_js"
+}
+
+# --- Pomožna: določi absolutno pot profila in mu dodaj OpenSC modul (+ enterprise roots) ---
+process_profile() {
+    local p_path="$1" p_rel="$2"
+    [[ -n "$p_path" ]] || return 0
+    local abs
+    if [[ "$p_rel" == "0" ]]; then abs="$p_path"; else abs="$SNAP_FIREFOX_DIR/$p_path"; fi
+    add_opensc_module_to_profile "$abs"
+    if [[ "${_ENT_ROOTS:-n}" == "y" ]]; then
+        set_enterprise_roots "$abs"
+    fi
+}
+
 if [[ -d "$SNAP_FIREFOX_DIR" ]]; then
     default_ini="$SNAP_FIREFOX_DIR/profiles.ini"
     FIREFOX_PROFILE_DIR=""
@@ -163,28 +220,48 @@ if [[ -d "$SNAP_FIREFOX_DIR" ]]; then
         fi
     fi
 
-    if [[ -d "$FIREFOX_PROFILE_DIR" ]]; then
-        log_info "Nastavljam Firefox profil '$FIREFOX_PROFILE_DIR' za eID..."
-
-        cat > "$FIREFOX_PROFILE_DIR/user.js" <<'EOF'
-// Samodejna podpora za pkcs#11 (potrebno za DNIe/GEMPC čitače)
-user_pref("security.smartcard_db", "true");
-user_pref("security.disable_initial_dialogs", true);
-user_pref("browser.sessionstore.resume_from_crash", false);
-
-// Prepreči predlogo "vprašaj pri vsaki uporabi" – uporabnik določi
-user_pref("security.default_personal_cert", "Select Automatically");
-
-// Omogoči enterprise roots za sistemsko PKCS#11
-user_pref("security.enterprise_roots.enabled", true);
-
-// Dodaj OpenSC PKCS#11 modul (narejen ročno prek Varnostnih Naprav, če ne deluje samodejno)
-// Pot: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
-EOF
-
-        log_info "✅ Firefox profil pripravljen."
+    # --- Vprašanje: omogoči enterprise roots? (opt-in, privzeto N) ---
+    # Omogoči Firefoxu, da zaupa korenskim in posredniškim potrdilom iz sistema
+    # (koristno za poslovna korenska potrdila, ki jih je treba podedovati).
+    _ENT_ROOTS="n"
+    echo ""
+    log_info "security.enterprise_roots.enabled omogoči Firefoxu, da zaupa korenskim in"
+    log_info "posredniškim potrdilom iz sistema (koristno za poslovna korenska potrdila)."
+    printf "  Ali naj to omogočim? [y/N]: "
+    read -r _ENT_ROOTS || _ENT_ROOTS="n"
+    case "$_ENT_ROOTS" in
+        [Yy]*) _ENT_ROOTS="y" ;;
+        *)     _ENT_ROOTS="n" ;;
+    esac
+    if [[ "$_ENT_ROOTS" == "y" ]]; then
+        log_info "  → enterprise roots bodo omogočeni."
     else
-        log_warn "Ne morem najti/ustvariti profila. Ročno poženi: snap run firefox -p"
+        log_info "  → enterprise roots ostanejo onemogočeni."
+    fi
+
+    # --- OpenSC modul (pkcs11.txt) v VSE profile iz profiles.ini ---
+    # Vsak Firefox profil ima svoj pkcs11.txt, zato modul dodamo v vsak —
+    # tako eID deluje ne glede na to, kateri profil uporabljamo.
+    if [[ -f "$default_ini" ]]; then
+        log_info "Dodajam OpenSC modul v vse Firefox profile (pkcs11.txt)..."
+        _cur_path=""; _cur_rel=1; _in_profile=0
+        while IFS= read -r _line; do
+            _line="${_line#"${_line%%[![:space:]]*}"}"   # odstrani vodnje presledke
+            if [[ "$_line" =~ ^\[Profile[0-9]+\] ]]; then
+                # nova sekcija profila: najprej obdelaj prejšnjega
+                process_profile "$_cur_path" "$_cur_rel"
+                _cur_path=""; _cur_rel=1; _in_profile=1
+            elif [[ "$_line" == \[* ]]; then
+                # druga vrsta sekcije (General / ProfileGroups / ProfileGroup)
+                _in_profile=0
+            elif [[ "$_in_profile" == "1" && "$_line" == Path=* ]]; then
+                _cur_path="${_line#Path=}"
+            elif [[ "$_in_profile" == "1" && "$_line" == IsRelative=* ]]; then
+                _cur_rel="${_line#IsRelative=}"
+            fi
+        done < "$default_ini"
+        # zadnji profil v datoteki
+        process_profile "$_cur_path" "$_cur_rel"
     fi
 else
     log_warn "Snap Firefox profilna mapa ($SNAP_FIREFOX_DIR) še ne obstaja."
