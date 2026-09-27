@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Startup Service Card Reader
+GenericName=Service Starter
+Comment=Start pcscd.service and pcscd.socket (Slovenian eID card reader)
+Exec=bash -c 'cd "$(dirname "%k")" && ./startup-service-card-reader.sh; echo ""; read -r -p "Press Enter to close this window..." _'
+Icon=startup-service-card-reader-icon.png
+Terminal=true
+Categories=System;Utility;
+Keywords=eid;pcscd;smartcard;reader;slovenia;
+StartupNotify=false
